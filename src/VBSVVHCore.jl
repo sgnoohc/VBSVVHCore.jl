@@ -257,10 +257,22 @@ function processsample(;dirpath::String, globpattern::String, issig::Bool, xsec:
 files = glob(globpattern, dirpath);
 
 @info "[VBSVVHCore] Processing NanoAOD dirpath=$dirpath"
-events = VBSVVHEvent[];
-for file in files
-    append!(events, processfile(file, issig=issig))
+
+# Prepare multi-thread output
+events = Vector{Vector{VBSVVHEvent}}()
+
+# Prepare a list of list of events to be threadsafe
+for i in 1:Threads.nthreads()
+    push!(events, VBSVVHEvent[])
 end
+
+# Multi-thread the output
+Threads.@threads for file in files
+    append!(events[Threads.threadid()], processfile(file, issig=issig))
+end
+
+# Splat it
+events = vcat(events...)
 
 @time writearrow(outputpath, events; xsec=xsec, ntotalevents=ntotalevents, samplename=samplename)
 
