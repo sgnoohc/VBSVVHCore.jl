@@ -5,6 +5,8 @@ using Hungarian
 using LVCyl
 using UnROOT
 using ProgressMeter
+using Glob
+using Tables
 
 export VBSVVHEvent
 export GenBoson, GenJet
@@ -12,6 +14,8 @@ export FatJet, Jet, Lepton, MET
 export LV
 
 export writearrow, readarrow
+
+export processsample
 
 # ________________________________________________________________________________________________________________
 """
@@ -112,7 +116,7 @@ Struct containing about the event information
 mutable struct VBSVVHEvent
     vbsj1::Jet
     vbsj2::Jet
-    higgs::FatJet
+    hbbjet::FatJet
     nlepton::Int32
     lepton1::Lepton
     lepton2::Lepton
@@ -122,6 +126,7 @@ mutable struct VBSVVHEvent
     fatjet1::FatJet
     fatjet2::FatJet
     met::MET
+    wgt::Int32
 end
 VBSVVHEvent() = VBSVVHEvent(Jet(),
                             Jet(),
@@ -134,7 +139,9 @@ VBSVVHEvent() = VBSVVHEvent(Jet(),
                             0,
                             FatJet(),
                             FatJet(),
-                            MET())
+                            MET(),
+                            1
+                           )
 
 ArrowTypes.arrowname(::Type{VBSVVHEvent}) = :VBSVVHEvent
 ArrowTypes.arrowname(::Type{Lepton}) = :Lepton
@@ -173,9 +180,24 @@ end
 
 Write the list of VBSVVHEvents to arrow
 """
-function writearrow(fname::String, events::Vector{VBSVVHEvent})
+function writearrow(fname::String, events::Vector{VBSVVHEvent}; xsec, ntotalevents, samplename)
     @info "[VBSVVHCore] Writing $fname..."
-    @time Arrow.write(fname, (event=events,))
+    # First create the `NamedTuple` of column name = event, and vector of events
+    nt = (event=events,)
+    # N.B. there is some gymnastics of calling `Tables.columns` involved here.
+    # https://github.com/JuliaData/Arrow.jl/issues/211
+    # Create a Arrow.Table
+    t = Tables.columns(Arrow.Table(Arrow.tobuffer(nt)))
+    # Add metadata
+    Arrow.setmetadata!(t,
+                       Dict(
+                            "xsec" => string(xsec),
+                            "ntotalevents" => string(ntotalevents),
+                            "samplename" => samplename
+                           )
+                      )
+    # Write to file
+    @time Arrow.write(fname, t)
     @info "[VBSVVHCore] Wrote to $fname"
 end
 
@@ -222,12 +244,33 @@ end
 
 # ________________________________________________________________________________________________________________
 """
+    processsample(;dirpath::String, globpattern::String, issig::Bool, xsec::Real, ntotalevents::Real, samplename::String, output::String)
+
+Process the NanoAOD ROOT file in `dirpath` with file names matched via `globpattern` and writes an output `.arrow` file.
+"""
+function processsample(;dirpath::String, globpattern::String, issig::Bool, xsec::Real, ntotalevents::Real, samplename::String, outputpath::String)
+
+# Signals
+files = glob(globpattern, dirpath);
+
+@info "[VBSVVHCore] Processing NanoAOD dirpath=$dirpath"
+events = VBSVVHEvent[];
+for file in files
+    append!(events, processfile(file, issig=issig))
+end
+
+@time writearrow(outputpath, events; xsec=xsec, ntotalevents=ntotalevents, samplename=samplename)
+
+end
+
+# ________________________________________________________________________________________________________________
+"""
     processfile(file::String, issig::Bool)
 
 Process the NanoAOD ROOT file in path `file` and return Vector{VBSVVHEvent}
 """
-function processfile(file::String, issig::Bool)
-    @info "[VBSVVHCore] Processing fpath=$fpath issig=$isig ..."
+function processfile(file::String; issig::Bool)
+    @info "[VBSVVHCore] Processing file=$file issig=$issig ..."
     f = getfile(file)
     t = gettree(f)
     a = processtree(t, issig)
@@ -256,24 +299,38 @@ function processtree(t, issig)
         length(selected_fatjets) < 3 && continue
 
         # Tag fatjets as boosted bosons
-        anah, anaw1, anaw2 = tag_fatjets(selected_fatjets)
+        hbbjet, fatjet1, fatjet2 = tag_fatjets(selected_fatjets)
 
         # Match the tagged boosted bosons against the genbosons
-        match_fatjets_to_genbosons(genh, genw1, genw2, anah, anaw1, anaw2)
+        match_fatjets_to_genbosons(genh, genw1, genw2, hbbjet, fatjet1, fatjet2)
 
         # Select jets not overlapping with the tagged boosted bosons
-        selected_jets = select_jets(evt, AnaFatJet[anah, anaw1, anaw2])
+        selected_jets = select_jets(evt, FatJet[hbbjet, fatjet1, fatjet2])
 
         # If n_jets < 2 skip
         length(selected_jets) < 2 && continue
 
         # Tag vbsjets
-        anaj1, anaj2 = tag_vbsjets(selected_jets)
+        vbsj1, vbsj2 = tag_vbsjets(selected_jets)
 
         # Match the tagged vbsjets against the genvbsjets
-        match_jets_to_genjets(genj1, genj2, anaj1, anaj2)
+        match_jets_to_genjets(genj1, genj2, vbsj1, vbsj2)
 
-        push!(vbsvvhevents, VBSVVHEvent(anah, anaw1, anaw2, anaj1, anaj2))
+        push!(vbsvvhevents, VBSVVHEvent(vbsj1,
+                                        vbsj2,
+                                        hbbjet,
+                                        0,
+                                        Lepton(),
+                                        Lepton(),
+                                        Lepton(),
+                                        Lepton(),
+                                        0,
+                                        fatjet1,
+                                        fatjet2,
+                                        MET(),
+                                        1
+                                       )
+             )
 
     end
     return vbsvvhevents
@@ -341,7 +398,7 @@ end
 # ________________________________________________________________________________________________________________
 function select_fatjets(evt)
     # Declare
-    selected_fatjets = Vector{AnaFatJet}()
+    selected_fatjets = Vector{FatJet}()
     # Get the FatJet data
     fj_pt = evt.FatJet_pt
     fj_eta = evt.FatJet_eta
@@ -355,7 +412,7 @@ function select_fatjets(evt)
     for i in 1:nfj
         # Check if the fatjet msoftdrop mass is largest than 40
         fj_msoftdrop[i] < 40 && continue
-        anafatjet = AnaFatJet()
+        anafatjet = FatJet()
         anafatjet.p4 = LV(fj_pt[i], fj_eta[i], fj_phi[i], fj_msoftdrop[i])
         anafatjet.hscore = fj_hscore[i]
         anafatjet.wscore = fj_wscore[i]
@@ -395,7 +452,7 @@ end
 # ________________________________________________________________________________________________________________
 function select_jets(evt, selected_fatjets)
     # Declare
-    selected_jets = Vector{AnaJet}()
+    selected_jets = Vector{Jet}()
     # Get the relevant jet data
     j_pt = evt.Jet_pt
     j_eta = evt.Jet_eta
@@ -406,7 +463,7 @@ function select_jets(evt, selected_fatjets)
     # Now loop over to select jets
     for i in 1:nj
         j_pt[i] < 30 && continue
-        jet = AnaJet()
+        jet = Jet()
         jet.p4 = LV(j_pt[i], j_eta[i], j_phi[i], j_mass[i])
         jet.bscore = j_bscore[i]
         jet.matched_genjet = GenJet()
@@ -433,8 +490,8 @@ function tag_vbsjets(selected_jets)
     else
         # If not two jets we sort the jets in each hemisphere and pick the highest pt jets in each hemi
         # First organize the jets into two buckets
-        jets_positive_eta = AnaJet[]
-        jets_negative_eta = AnaJet[]
+        jets_positive_eta = Jet[]
+        jets_negative_eta = Jet[]
         for j in selected_jets
             if j.p4.eta > 0
                 push!(jets_positive_eta, j)
@@ -446,13 +503,13 @@ function tag_vbsjets(selected_jets)
         if length(jets_positive_eta) == 0 || length(jets_negative_eta) == 0
             return selected_jets[1], selected_jets[2]
         end
-        jet_pos = AnaJet()
+        jet_pos = Jet()
         for jp in jets_positive_eta
             if energy(jet_pos.p4) < energy(jp.p4)
                 jet_pos = jp
             end
         end
-        jet_neg = AnaJet()
+        jet_neg = Jet()
         for jn in jets_negative_eta
             if energy(jet_neg.p4) < energy(jn.p4)
                 jet_neg = jn
