@@ -9,12 +9,13 @@ Start julia prompt
 Install packages
 
     # (press ] key)
+    dev git@github.com:sgnoohc/VBSVVHCore.jl.git # To develop
+    # For additional packages that are useful
     add Revise
     add LVCyl
     add FHist
     add Arrow
     add https://github.com/sgnoohc/PlotlyJSWrapper.jl
-    dev git@github.com:sgnoohc/VBSVVHCore.jl.git # To develop
     # (press backspace key)
 
 The analysis script is [`analysis.jl`](https://github.com/sgnoohc/VBSVVHCore.jl/blob/main/scripts/analysis.jl).  
