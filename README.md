@@ -15,6 +15,7 @@ Install packages
     add LVCyl
     add FHist
     add Arrow
+    add ProgressMeter
     add https://github.com/sgnoohc/PlotlyJSWrapper.jl
     # (press backspace key)
 
