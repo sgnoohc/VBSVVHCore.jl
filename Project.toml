@@ -1,0 +1,4 @@
+name = "VBSVVHCore"
+uuid = "fdde0d3c-ae97-4e80-86d0-2b920f6e8c68"
+authors = ["Philip Chang <philip@ucsd.edu>"]
+version = "0.1.0"
