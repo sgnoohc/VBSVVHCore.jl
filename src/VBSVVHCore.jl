@@ -126,7 +126,8 @@ mutable struct VBSVVHEvent
     fatjet1::FatJet
     fatjet2::FatJet
     met::MET
-    wgt::Int32
+    wgtsign::Int32
+    rewgts::Vector{Float32}
 end
 VBSVVHEvent() = VBSVVHEvent(Jet(),
                             Jet(),
@@ -140,7 +141,8 @@ VBSVVHEvent() = VBSVVHEvent(Jet(),
                             FatJet(),
                             FatJet(),
                             MET(),
-                            1
+                            1,
+                            Float32[]
                            )
 
 ArrowTypes.arrowname(::Type{VBSVVHEvent}) = :VBSVVHEvent
@@ -237,6 +239,7 @@ function gettree(f::ROOTFile)
         r"^FatJet_(pt|eta|phi|mass|msoftdrop|deepTagMD_WvsQCD|deepTagMD_ZvsQCD|deepTagMD_HbbvsQCD)$",
         r"^Jet_(pt|eta|phi|mass|btagDeepFlavB)$",
         r"^LHEPart_(pt|eta|phi|mass|pdgId)$",
+        r"^LHEReweightingWeight$",
         ];
     t = LazyTree(f, "Events", branches)
     return t
@@ -319,16 +322,17 @@ function processtree(t, issig)
         push!(vbsvvhevents, VBSVVHEvent(vbsj1,
                                         vbsj2,
                                         hbbjet,
-                                        0,
+                                        -999,
                                         Lepton(),
                                         Lepton(),
                                         Lepton(),
                                         Lepton(),
-                                        0,
+                                        length(selected_fatjets),
                                         fatjet1,
                                         fatjet2,
                                         MET(),
-                                        1
+                                        1,
+                                        evt.LHEReweightingWeight
                                        )
              )
 
