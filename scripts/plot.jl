@@ -18,6 +18,8 @@ hnames = ["h_mjj",
           "h_hscore",
           "h_wscore1",
           "h_wscore2",
+          "h_zscore1",
+          "h_zscore2",
           "h_mvvv",
          ]
 
@@ -41,6 +43,8 @@ function gethistograms(arrowfilepath)
     h_hscore = Hist1D(Float32; bins=0:0.02:1);
     h_wscore1 = Hist1D(Float32; bins=0:0.02:1);
     h_wscore2 = Hist1D(Float32; bins=0:0.02:1);
+    h_zscore1 = Hist1D(Float32; bins=0:0.02:1);
+    h_zscore2 = Hist1D(Float32; bins=0:0.02:1);
     h_mvvv = Hist1D(Float32; bins=0:50:4500);
     @showprogress for evt in t.event
         smrewgt = if rewgt_idx == 0
@@ -57,6 +61,7 @@ function gethistograms(arrowfilepath)
         evt.fatjet2.p4.mass > 100 && continue
         abs(evt.vbsj1.p4.eta - evt.vbsj2.p4.eta) < 5 && continue
         fast_mass(evt.vbsj1.p4, evt.vbsj2.p4) < 1500 && continue
+        (evt.hbbjet.p4+evt.fatjet1.p4+evt.fatjet2.p4).mass < 1500 && continue
         evtwgt = xsec * 1000 / ntotalevents * 137 * smrewgt
         push!(h_mjj, fast_mass(evt.vbsj1.p4, evt.vbsj2.p4), evtwgt)
         push!(h_detajj, abs(evt.vbsj1.p4.eta - evt.vbsj2.p4.eta), evtwgt)
@@ -70,6 +75,8 @@ function gethistograms(arrowfilepath)
         push!(h_hscore, evt.hbbjet.hscore, evtwgt)
         push!(h_wscore1, evt.fatjet1.wscore, evtwgt)
         push!(h_wscore2, evt.fatjet2.wscore, evtwgt)
+        push!(h_zscore1, evt.fatjet1.zscore, evtwgt)
+        push!(h_zscore2, evt.fatjet2.zscore, evtwgt)
         push!(h_mvvv, (evt.hbbjet.p4+evt.fatjet1.p4+evt.fatjet2.p4).mass, evtwgt)
     end
     hists = Dict(
@@ -85,6 +92,8 @@ function gethistograms(arrowfilepath)
                  "h_hscore" => h_hscore,
                  "h_wscore1" => h_wscore1,
                  "h_wscore2" => h_wscore2,
+                 "h_zscore1" => h_zscore1,
+                 "h_zscore2" => h_zscore2,
                  "h_mvvv" => h_mvvv,
                 )
 end
@@ -101,12 +110,13 @@ ttb_hists = gethistograms("TTToHadronic.arrow")
     sigs = [sig1_hists[hname]+sig2_hists[hname]+sig3_hists[hname]+sig4_hists[hname]]
     bkgs = [qcd_hists[hname], ttb_hists[hname]]
     bkglabel = ["QCD_HT700to1000", "TTToHadronic"]
+    signallabels = ["VBSVVH C<sub>2V</sub>=2"]
     plot_stack(backgrounds=bkgs,
                signals=sigs,
                outputname="plots/$hname.{html,png,pdf}",
                xaxistitle="$hname",
                backgroundlabels=bkglabel,
-               signallabels=["VBSVVH"],
+               signallabels=signallabels,
                showfomfromleft=true,
                # showratio=true,
               );

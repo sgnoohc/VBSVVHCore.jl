@@ -295,15 +295,11 @@ end
 
 # ________________________________________________________________________________________________________________
 """
-    processtree(
+    processevent_v1(evt)
 
-Process the TTree and return Vector{VBSVVHEvent}
+Process the event and return `VBSVVHEvent`
 """
-function processtree(t, issig)
-    @info string("[VBSVVHCore] Total N Events = ", length(t))
-    vbsvvhevents = VBSVVHEvent[]
-    @showprogress for evt in t
-
+function processevent_v1(evt)
         # Select generator level objects
         genj1, genj2, genw1, genw2, genh = select_gens(evt, issig)
 
@@ -331,23 +327,48 @@ function processtree(t, issig)
         # Match the tagged vbsjets against the genvbsjets
         match_jets_to_genjets(genj1, genj2, vbsj1, vbsj2)
 
-        push!(vbsvvhevents, VBSVVHEvent(vbsj1,
-                                        vbsj2,
-                                        hbbjet,
-                                        -999,
-                                        Lepton(),
-                                        Lepton(),
-                                        Lepton(),
-                                        Lepton(),
-                                        length(selected_fatjets),
-                                        fatjet1,
-                                        fatjet2,
-                                        MET(),
-                                        1,
-                                        evt.LHEReweightingWeight
-                                       )
-             )
+        # Return the event
+        VBSVVHEvent(vbsj1,
+                    vbsj2,
+                    hbbjet,
+                    -999,
+                    Lepton(),
+                    Lepton(),
+                    Lepton(),
+                    Lepton(),
+                    length(selected_fatjets),
+                    fatjet1,
+                    fatjet2,
+                    MET(),
+                    1,
+                    evt.LHEReweightingWeight
+                   )
+end
 
+
+# ________________________________________________________________________________________________________________
+"""
+    processevent(evt)
+
+Process the event and return `VBSVVHEvent`
+"""
+function processevent(evt)
+    processevent_v1(evt)
+end
+
+
+# ________________________________________________________________________________________________________________
+"""
+    processtree(
+
+Process the TTree and return Vector{VBSVVHEvent}
+"""
+function processtree(t, issig)
+    @info string("[VBSVVHCore] Total N Events = ", length(t))
+    vbsvvhevents = VBSVVHEvent[]
+    @showprogress for evt in t
+        vbsvvhevent = processevent(evt)
+        push!(vbsvvhevents, vbsvvhevent)
     end
     return vbsvvhevents
 end
