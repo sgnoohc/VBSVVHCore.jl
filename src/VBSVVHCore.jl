@@ -240,6 +240,7 @@ function gettree(f::ROOTFile)
         r"^Jet_(pt|eta|phi|mass|btagDeepFlavB)$",
         r"^LHEPart_(pt|eta|phi|mass|pdgId)$",
         r"^LHEReweightingWeight$",
+        r"^Generator_weight$",
         ];
     t = LazyTree(f, "Events", branches)
     return t
@@ -251,7 +252,7 @@ end
 
 Process the NanoAOD ROOT file in `dirpath` with file names matched via `globpattern` and writes an output `.arrow` file.
 """
-function processsample(;dirpath::String, globpattern::String, issig::Bool, xsec::Real, ntotalevents::Real, samplename::String, outputpath::String)
+function processsample(;dirpath::String, globpattern::String, issig::Bool, xsec::Real, ntotalevents::Real=-1, samplename::String, outputpath::String)
 
 # Signals
 files = glob(globpattern, dirpath);
@@ -260,21 +261,30 @@ files = glob(globpattern, dirpath);
 
 # Prepare multi-thread output
 events = Vector{Vector{VBSVVHEvent}}()
+ntotevts = Vector{Int64}()
 
 # Prepare a list of list of events to be threadsafe
 for i in 1:Threads.nthreads()
     push!(events, VBSVVHEvent[])
 end
 
+# Prepare a list of list of events to be threadsafe
+for i in 1:Threads.nthreads()
+    push!(ntotevts, 0)
+end
+
 # Multi-thread the output
 Threads.@threads for file in files
-    append!(events[Threads.threadid()], processfile(file, issig=issig))
+    (a, n) = processfile(file, issig=issig)
+    append!(events[Threads.threadid()], a)
+    events[Threads.threadid()] += n
 end
 
 # Splat it
 events = vcat(events...)
+nevts = ntotalevents <= 0 ? sum(events) : ntotalevents;
 
-@time writearrow(outputpath, events; xsec=xsec, ntotalevents=ntotalevents, samplename=samplename)
+@time writearrow(outputpath, events; xsec=xsec, ntotalevents=nevts, samplename=samplename)
 
 end
 
@@ -288,89 +298,93 @@ function processfile(file::String; issig::Bool)
     @info "[VBSVVHCore] Processing file=$file issig=$issig ..."
     f = getfile(file)
     t = gettree(f)
-    a = processtree(t, issig)
+    (a, n) = processtree(t, issig=issig)
     Base.close(f.fobj)
-    return a
+    return (a, n)
 end
 
 # ________________________________________________________________________________________________________________
 """
-    processevent_v1(evt)
+    processevent_v1(evt; issig)
 
 Process the event and return `VBSVVHEvent`
 """
-function processevent_v1(evt)
-        # Select generator level objects
-        genj1, genj2, genw1, genw2, genh = select_gens(evt, issig)
+function processevent_v1(evt; issig)
+    # Select generator level objects
+    genj1, genj2, genw1, genw2, genh = select_gens(evt, issig)
 
-        # Select fatjets
-        selected_fatjets = select_fatjets(evt)
+    # Select fatjets
+    selected_fatjets = select_fatjets(evt)
 
-        # If n_fatjets < 3 skip
-        length(selected_fatjets) < 3 && continue
+    # If n_fatjets < 3 skip
+    length(selected_fatjets) < 3 && return nothing
 
-        # Tag fatjets as boosted bosons
-        hbbjet, fatjet1, fatjet2 = tag_fatjets(selected_fatjets)
+    # Tag fatjets as boosted bosons
+    hbbjet, fatjet1, fatjet2 = tag_fatjets(selected_fatjets)
 
-        # Match the tagged boosted bosons against the genbosons
-        match_fatjets_to_genbosons(genh, genw1, genw2, hbbjet, fatjet1, fatjet2)
+    # Match the tagged boosted bosons against the genbosons
+    match_fatjets_to_genbosons(genh, genw1, genw2, hbbjet, fatjet1, fatjet2)
 
-        # Select jets not overlapping with the tagged boosted bosons
-        selected_jets = select_jets(evt, FatJet[hbbjet, fatjet1, fatjet2])
+    # Select jets not overlapping with the tagged boosted bosons
+    selected_jets = select_jets(evt, FatJet[hbbjet, fatjet1, fatjet2])
 
-        # If n_jets < 2 skip
-        length(selected_jets) < 2 && continue
+    # If n_jets < 2 skip
+    length(selected_jets) < 2 && return nothing
 
-        # Tag vbsjets
-        vbsj1, vbsj2 = tag_vbsjets(selected_jets)
+    # Tag vbsjets
+    vbsj1, vbsj2 = tag_vbsjets(selected_jets)
 
-        # Match the tagged vbsjets against the genvbsjets
-        match_jets_to_genjets(genj1, genj2, vbsj1, vbsj2)
+    # Match the tagged vbsjets against the genvbsjets
+    match_jets_to_genjets(genj1, genj2, vbsj1, vbsj2)
 
-        # Return the event
-        VBSVVHEvent(vbsj1,
-                    vbsj2,
-                    hbbjet,
-                    -999,
-                    Lepton(),
-                    Lepton(),
-                    Lepton(),
-                    Lepton(),
-                    length(selected_fatjets),
-                    fatjet1,
-                    fatjet2,
-                    MET(),
-                    1,
-                    evt.LHEReweightingWeight
-                   )
+    # Return the event
+    VBSVVHEvent(vbsj1,
+                vbsj2,
+                hbbjet,
+                -999,
+                Lepton(),
+                Lepton(),
+                Lepton(),
+                Lepton(),
+                length(selected_fatjets),
+                fatjet1,
+                fatjet2,
+                MET(),
+                1,
+                evt.LHEReweightingWeight
+               )
 end
 
 
 # ________________________________________________________________________________________________________________
 """
-    processevent(evt)
+    processevent(evt; issig)
 
 Process the event and return `VBSVVHEvent`
 """
-function processevent(evt)
-    processevent_v1(evt)
+function processevent(evt; issig)
+    processevent_v1(evt, issig=issig)
 end
 
 
 # ________________________________________________________________________________________________________________
 """
-    processtree(
+    processtree(t; issig)
 
-Process the TTree and return Vector{VBSVVHEvent}
+Process the TTree and return Vector{VBSVVHEvent} and ntotalevents processed (takes argument whether it is signal tree)
 """
-function processtree(t, issig)
+function processtree(t; issig)
     @info string("[VBSVVHCore] Total N Events = ", length(t))
     vbsvvhevents = VBSVVHEvent[]
+    ntotalevents = 0
     @showprogress for evt in t
-        vbsvvhevent = processevent(evt)
-        push!(vbsvvhevents, vbsvvhevent)
+        ntotalevents += sign(evt.Generator_weight)
+        vbsvvhevent = processevent(evt, issig=issig)
+        if !isnothing(vbsvvhevent)
+            push!(vbsvvhevents, vbsvvhevent)
+        end
     end
-    return vbsvvhevents
+    return (vbsvvhevents, ntotalevents)
 end
 
 
